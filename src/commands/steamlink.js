@@ -1,16 +1,15 @@
 /*
     Link Command Module
     Lets users link/unlink their SteamID to Discord.
-    Maintains a message in a specified channel with the list.
 */
 
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const DiscordEmbeds = require('../discordTools/discordEmbeds.js');
-const InstanceUtils = require('../util/instanceUtils.js'); // for saving data (or you can make a new file)
+const { EmbedBuilder } = require('discord.js');
+const InstanceUtils = require('../util/instanceUtils.js');
 
 const LINKED_USERS_FILE = 'linkedUsers.json'; // stored per guild
+const LIST_MESSAGE_FILE = 'listMessage.json'; // stores the message ID
 const LIST_CHANNEL_ID = 'YOUR_CHANNEL_ID_HERE'; // replace with your channel ID
-const LIST_MESSAGE_FILE = 'listMessage.json';   // stores the message ID to update
 
 module.exports = {
     name: 'link',
@@ -49,8 +48,7 @@ module.exports = {
                 await removeLink(client, interaction);
                 break;
             case 'list':
-                await sendOrUpdateList(client, interaction.guildId);
-                await interaction.editReply('✅ Updated list in the channel.');
+                await sendOrUpdateList(client, interaction.guildId, true, interaction);
                 break;
         }
     }
@@ -103,34 +101,51 @@ async function removeLink(client, interaction) {
     await sendOrUpdateList(client, guildId);
 }
 
-async function sendOrUpdateList(client, guildId) {
+/**
+ * Updates the embed list message in the specified channel.
+ * If ephemeralInteraction is provided, it will also show the list to the user privately.
+ */
+async function sendOrUpdateList(client, guildId, ephemeral = false, ephemeralInteraction = null) {
     const channel = client.channels.cache.get(LIST_CHANNEL_ID);
     if (!channel) return;
 
     const linked = readLinkedUsers(guildId);
     const members = Object.entries(linked).map(([userId, data]) => {
-        return `<@${userId}> — SteamID: \`${data.steamId}\``;
+        return `👤 <@${userId}>  —  🎮 SteamID: \`${data.steamId}\``;
     });
 
-    const content = members.length > 0
-        ? `**Linked Users:**\n${members.join('\n')}`
-        : 'No users linked yet.';
+    const description = members.length > 0
+        ? members.join('\n')
+        : '🚫 No users linked yet.';
 
-    // store message ID so we update instead of spamming
+    // build embed
+    const embed = new EmbedBuilder()
+        .setTitle('🔗 Linked Steam Accounts')
+        .setDescription(description)
+        .setColor('#2f3136')
+        .setFooter({ text: `Total linked users: ${members.length}` })
+        .setTimestamp();
+
+    // update persistent channel message
     const msgStore = InstanceUtils.readCustomFile(guildId, LIST_MESSAGE_FILE) || {};
     let msg;
     if (msgStore.messageId) {
         try {
             msg = await channel.messages.fetch(msgStore.messageId);
-            await msg.edit(content);
+            await msg.edit({ embeds: [embed] });
         } catch {
-            msg = await channel.send(content);
+            msg = await channel.send({ embeds: [embed] });
             msgStore.messageId = msg.id;
             InstanceUtils.writeCustomFile(guildId, LIST_MESSAGE_FILE, msgStore);
         }
     } else {
-        msg = await channel.send(content);
+        msg = await channel.send({ embeds: [embed] });
         msgStore.messageId = msg.id;
         InstanceUtils.writeCustomFile(guildId, LIST_MESSAGE_FILE, msgStore);
+    }
+
+    //reply
+    if (ephemeral && ephemeralInteraction) {
+        await ephemeralInteraction.editReply({ embeds: [embed] });
     }
 }
