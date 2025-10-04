@@ -4,7 +4,8 @@
     and maintaining a persistent embed list in a specified channel.
 */
 
-const { SlashCommandBuilder, EmbedBuilder } = require('@discordjs/builders');
+const { SlashCommandBuilder } = require('@discordjs/builders');
+const { EmbedBuilder } = require('discord.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 
 // Where to post the persistent list (replace with your channel ID)
@@ -30,7 +31,7 @@ async function sendOrUpdateList(client, guildId, ephemeral = false, ephemeralInt
     const linked = readLinkedUsers(guildId);
 
     const members = Object.entries(linked).map(([userId, data]) => {
-        let line = `👤 <@${userId}> — 🎮 [Steam Profile](https://steamcommunity.com/id/${data.steamId}/)`;
+        let line = `👤 <@${userId}> — 🎮 [Steam Profile](https://steamcommunity.com/profiles/${data.steamId}/)`;
         if (data.steamFriendCode) {
             line += ` — 🔑 Friend Code: \`${data.steamFriendCode}\``;
         }
@@ -96,7 +97,7 @@ module.exports = {
                 .addStringOption(option => option
                     .setName('steamid')
                     .setDescription('The Steam ID')
-                    .setRequired(true))
+                    .setRequired(false))
                 .addStringOption(option => option
                     .setName('steamfriendcode')
                     .setDescription('Optional Steam friend code')
