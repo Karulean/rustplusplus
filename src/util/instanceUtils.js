@@ -48,7 +48,7 @@ module.exports = {
         Fs.writeFileSync(path, JSON.stringify(credentials, null, 2));
     },
 
-    // --- NEW GENERIC HELPERS ---
+    // --- GENERIC HELPERS ---
     readCustomFile: function (guildId, fileName) {
         const dir = Path.join(__dirname, '..', '..', 'data', guildId);
         ensureDir(dir);
