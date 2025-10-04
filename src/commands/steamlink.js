@@ -8,7 +8,7 @@ const { SlashCommandBuilder } = require('@discordjs/builders');
 const { EmbedBuilder } = require('discord.js');
 const InstanceUtils = require('../util/instanceUtils.js');
 
-// Where to post the persistent list (replace with your channel ID)
+// Replace with your actual channel ID
 const LIST_CHANNEL_ID = 'CHANNEL ID';
 const LIST_MESSAGE_FILE = 'linkedUsers.json';
 
@@ -31,10 +31,16 @@ async function sendOrUpdateList(client, guildId, ephemeral = false, ephemeralInt
     const linked = readLinkedUsers(guildId);
 
     const members = Object.entries(linked).map(([userId, data]) => {
-        let line = `👤 <@${userId}> — 🎮 [Steam Profile](https://steamcommunity.com/profiles/${data.steamId}/)`;
+        let line = `👤 <@${userId}>`;
+
+        if (data.steamId) {
+            line += ` — 🎮 [Steam Profile](https://steamcommunity.com/profiles/${data.steamId}/)`;
+        }
+
         if (data.steamFriendCode) {
             line += ` — 🔑 Friend Code: \`${data.steamFriendCode}\``;
         }
+
         return line;
     });
 
@@ -121,7 +127,7 @@ module.exports = {
         switch (interaction.options.getSubcommand()) {
             case 'add': {
                 const user = interaction.options.getUser('discorduser');
-                const steamId = interaction.options.getString('steamid');
+                const steamId = interaction.options.getString('steamid') || null;
                 const steamFriendCode = interaction.options.getString('steamfriendcode') || null;
 
                 const linked = readLinkedUsers(guildId);
