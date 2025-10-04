@@ -1,7 +1,7 @@
 /*
     /link command for Discord bot
-    Allows linking Discord users to Steam accounts, removing them,
-    grouping them by Clan, and maintaining a persistent embed list.
+    Allows linking Discord users to Steam accounts and clans,
+    updating them, and maintaining a persistent embed list.
 */
 
 const { SlashCommandBuilder } = require('@discordjs/builders');
@@ -12,7 +12,7 @@ const InstanceUtils = require('../util/instanceUtils.js');
 const LIST_CHANNEL_ID = 'CHANNEL ID';
 const LIST_MESSAGE_FILE = 'linkedUsers.json';
 
-/* -------------------------- File Utilities -------------------------- */
+/* -------------------------- File Helpers -------------------------- */
 
 function readLinkedUsers(guildId) {
     try {
@@ -26,20 +26,18 @@ function writeLinkedUsers(guildId, data) {
     InstanceUtils.writeCustomFile(guildId, LIST_MESSAGE_FILE, data);
 }
 
-/* -------------------------- Table Formatting -------------------------- */
+/* -------------------------- Embed Formatting -------------------------- */
 
-function formatTable(clanMembers) {
-    const header = '`Team Member           | Status | Location`\n';
-    const divider = '`-----------------------|--------|----------`\n';
-
-    const rows = clanMembers.map(member => {
-        const name = `<@${member.userId}>`.padEnd(23, ' ');
-        const status = (member.status || '☠️').padEnd(6, ' ');
-        const location = (member.location || '-').padEnd(8, ' ');
-        return `\`${name}| ${status}| ${location}\``;
-    });
-
-    return header + divider + rows.join('\n');
+function formatClanSection(clanName, members) {
+    let desc = '```Team Member                 Steam ID / Friend Code```';
+    for (const m of members) {
+        const user = `<@${m.userId}>`;
+        const steam = m.steamId ? `${m.steamId}` : '-';
+        const friend = m.steamFriendCode ? `${m.steamFriendCode}` : '-';
+        desc += `\n${user.padEnd(27)} ${steam} / ${friend}`;
+    }
+    desc += '```';
+    return { name: `🏴 ${clanName}`, value: desc };
 }
 
 /* -------------------------- Embed Update Logic -------------------------- */
@@ -50,20 +48,19 @@ async function sendOrUpdateList(client, guildId, ephemeral = false, ephemeralInt
 
     const linked = readLinkedUsers(guildId);
 
-    // Group by clan
     const clanGroups = {};
     for (const [userId, data] of Object.entries(linked)) {
         const clan = data.clan || 'No Clan';
         if (!clanGroups[clan]) clanGroups[clan] = [];
         clanGroups[clan].push({
             userId,
-            status: data.status || '☠️',
-            location: data.location || '-',
+            steamId: data.steamId || null,
+            steamFriendCode: data.steamFriendCode || null,
         });
     }
 
     const embed = new EmbedBuilder()
-        .setTitle('🛡️ Team Member Information')
+        .setTitle('🛡️ Team Members')
         .setColor('#1b2838')
         .setTimestamp();
 
@@ -72,13 +69,11 @@ async function sendOrUpdateList(client, guildId, ephemeral = false, ephemeralInt
     } else {
         const sortedClans = Object.keys(clanGroups).sort();
         for (const clan of sortedClans) {
-            const tableText = formatTable(clanGroups[clan]);
-            embed.addFields({ name: `🏴 ${clan}`, value: tableText });
+            embed.addFields(formatClanSection(clan, clanGroups[clan]));
         }
         embed.setFooter({ text: `Total linked users: ${Object.keys(linked).length}` });
     }
 
-    // Manage persistent message
     const msgStore = InstanceUtils.readCustomFile(guildId, LIST_MESSAGE_FILE + '.store') || {};
     let msg;
 
@@ -110,25 +105,44 @@ module.exports = {
     getData(client, guildId) {
         return new SlashCommandBuilder()
             .setName('link')
-            .setDescription('Link a Discord user to a Steam account')
+            .setDescription('Link Discord users to Steam accounts and clans')
             .addSubcommand(subcommand => subcommand
                 .setName('add')
-                .setDescription('Link a Discord user and assign optional clan/status/location')
+                .setDescription('Link a Discord user with optional Steam info and clan')
                 .addUserOption(option => option
                     .setName('discorduser')
                     .setDescription('The Discord user to link')
                     .setRequired(true))
                 .addStringOption(option => option
+                    .setName('steamid')
+                    .setDescription('Steam ID (optional)')
+                    .setRequired(false))
+                .addStringOption(option => option
+                    .setName('steamfriendcode')
+                    .setDescription('Steam friend code (optional)')
+                    .setRequired(false))
+                .addStringOption(option => option
                     .setName('clan')
-                    .setDescription('The clan this user belongs to')
+                    .setDescription('Clan this user belongs to')
+                    .setRequired(false)))
+            .addSubcommand(subcommand => subcommand
+                .setName('update')
+                .setDescription('Update an existing user’s Steam info or clan')
+                .addUserOption(option => option
+                    .setName('discorduser')
+                    .setDescription('The Discord user to update')
+                    .setRequired(true))
+                .addStringOption(option => option
+                    .setName('steamid')
+                    .setDescription('New Steam ID')
                     .setRequired(false))
                 .addStringOption(option => option
-                    .setName('status')
-                    .setDescription('Optional status emoji or text')
+                    .setName('steamfriendcode')
+                    .setDescription('New Steam friend code')
                     .setRequired(false))
                 .addStringOption(option => option
-                    .setName('location')
-                    .setDescription('Optional player location')
+                    .setName('clan')
+                    .setDescription('New clan name')
                     .setRequired(false)))
             .addSubcommand(subcommand => subcommand
                 .setName('remove')
@@ -146,25 +160,46 @@ module.exports = {
         const guildId = interaction.guildId;
         await interaction.deferReply({ ephemeral: true });
 
-        switch (interaction.options.getSubcommand()) {
+        const linked = readLinkedUsers(guildId);
+        const sub = interaction.options.getSubcommand();
+
+        switch (sub) {
             case 'add': {
                 const user = interaction.options.getUser('discorduser');
+                const steamId = interaction.options.getString('steamid') || null;
+                const steamFriendCode = interaction.options.getString('steamfriendcode') || null;
                 const clan = interaction.options.getString('clan') || 'No Clan';
-                const status = interaction.options.getString('status') || '☠️';
-                const location = interaction.options.getString('location') || '-';
 
-                const linked = readLinkedUsers(guildId);
-                linked[user.id] = { clan, status, location };
+                linked[user.id] = { steamId, steamFriendCode, clan };
                 writeLinkedUsers(guildId, linked);
 
                 await sendOrUpdateList(client, guildId, true, interaction);
                 break;
             }
 
+            case 'update': {
+                const user = interaction.options.getUser('discorduser');
+
+                if (!linked[user.id]) {
+                    await interaction.editReply({ content: '❌ This user is not currently linked.' });
+                    return;
+                }
+
+                const steamId = interaction.options.getString('steamid');
+                const steamFriendCode = interaction.options.getString('steamfriendcode');
+                const clan = interaction.options.getString('clan');
+
+                if (steamId !== null) linked[user.id].steamId = steamId;
+                if (steamFriendCode !== null) linked[user.id].steamFriendCode = steamFriendCode;
+                if (clan !== null) linked[user.id].clan = clan;
+
+                writeLinkedUsers(guildId, linked);
+                await sendOrUpdateList(client, guildId, true, interaction);
+                break;
+            }
+
             case 'remove': {
                 const user = interaction.options.getUser('discorduser');
-                const linked = readLinkedUsers(guildId);
-
                 if (linked[user.id]) {
                     delete linked[user.id];
                     writeLinkedUsers(guildId, linked);
